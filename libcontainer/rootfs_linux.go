@@ -43,9 +43,13 @@ func needsSetupDev(config *configs.Config) bool {
 // finalizeRootfs after this function to finish setting up the rootfs.
 func prepareRootfs(pipe io.ReadWriter, iConfig *initConfig) (err error) {
 	config := iConfig.Config
-	if err := prepareRoot(config); err != nil {
-		return newSystemErrorWithCause(err, "preparing rootfs")
-	}
+
+	// HACK: WSL2: skip --make-rslave on the old /
+	/*
+		if err := prepareRoot(config); err != nil {
+			return newSystemErrorWithCause(err, "preparing rootfs")
+		}
+	*/
 
 	hasCgroupns := config.Namespaces.Contains(configs.NEWCGROUP)
 	setupDev := needsSetupDev(config)
@@ -106,13 +110,21 @@ func prepareRootfs(pipe io.ReadWriter, iConfig *initConfig) (err error) {
 		return err
 	}
 
-	if config.NoPivotRoot {
-		err = msMoveRoot(config.Rootfs)
-	} else if config.Namespaces.Contains(configs.NEWNS) {
-		err = pivotRoot(config.Rootfs)
-	} else {
-		err = chroot()
-	}
+	// WSL2 Errata: mount --move /path / fails silently.
+	// This breaks pivotRoot and msMoveRoot.
+	// Instead, just use chroot directly.
+	err = chroot()
+
+	/*
+		if config.NoPivotRoot {
+			err = msMoveRoot(config.Rootfs)
+		} else if config.Namespaces.Contains(configs.NEWNS) {
+			err = pivotRoot(config.Rootfs)
+		} else {
+			err = chroot()
+		}
+	*/
+
 	if err != nil {
 		return newSystemErrorWithCause(err, "jailing process inside rootfs")
 	}
@@ -150,11 +162,14 @@ func finalizeRootfs(config *configs.Config) (err error) {
 	}
 
 	// set rootfs ( / ) as readonly
-	if config.Readonlyfs {
-		if err := setReadonly(); err != nil {
-			return newSystemErrorWithCause(err, "setting rootfs as readonly")
+	// WSL2: disable as this does not work properly.
+	/*
+		if config.Readonlyfs {
+			if err := setReadonly(); err != nil {
+				return newSystemErrorWithCause(err, "setting rootfs as readonly")
+			}
 		}
-	}
+	*/
 
 	unix.Umask(0022)
 	return nil
@@ -713,6 +728,7 @@ func prepareRoot(config *configs.Config) error {
 	if config.RootPropagation != 0 {
 		flag = config.RootPropagation
 	}
+
 	if err := unix.Mount("", "/", "", uintptr(flag), ""); err != nil {
 		return err
 	}
@@ -834,6 +850,9 @@ func msMoveRoot(rootfs string) error {
 			}
 		}
 	}
+	// WSL2: mount --move {path} / fails silently.
+	// The chroot() still works (changes dir to ., which is rootfs).
+	// Therefore the container still starts, but "exec" will be in the wrong place.
 	if err := unix.Mount(rootfs, "/", "", unix.MS_MOVE, ""); err != nil {
 		return err
 	}

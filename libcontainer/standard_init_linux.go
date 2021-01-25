@@ -46,6 +46,7 @@ func (l *linuxStandardInit) getSessionRingParams() (string, uint32, uint32) {
 func (l *linuxStandardInit) Init() error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+
 	if !l.config.Config.NoNewKeyring {
 		if err := selinux.SetKeyLabel(l.config.ProcessLabel); err != nil {
 			return err

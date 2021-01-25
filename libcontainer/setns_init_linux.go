@@ -32,6 +32,21 @@ func (l *linuxSetnsInit) Init() error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
+	// HACK: WSL2: awkward chroot, cannot override root /.
+	if err := wslChroot(); err != nil {
+		return err
+	}
+
+	// HACK: WSL2: second chroot to enter rootfs path.
+	if l.config.Config != nil && l.config.Config.Rootfs != "" {
+		if err := unix.Chroot(l.config.Config.Rootfs); err != nil {
+			return errors.Wrap(err, "wsl2: join container rootfs")
+		}
+	}
+	if err := unix.Chdir("/"); err != nil {
+		return err
+	}
+
 	if !l.config.Config.NoNewKeyring {
 		if err := selinux.SetKeyLabel(l.config.ProcessLabel); err != nil {
 			return err
